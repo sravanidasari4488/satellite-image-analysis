@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Satellite Analysis - Backend Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        .status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .api-response {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛰️ Satellite Image Analysis - Backend Test</h1>
+        
+        <div class="status info">
+            <strong>Backend Server Status:</strong> <span id="server-status">Checking...</span>
+        </div>
+
+        <h2>API Endpoints Test</h2>
+        
+        <button onclick="testHealth()">Test Health Check</button>
+        <button onclick="testAuth()">Test Authentication</button>
+        <button onclick="testWeather()">Test Weather API</button>
+        <button onclick="testLocation()">Test Location API</button>
+        
+        <div id="response" class="api-response" style="display: none;"></div>
+
+        <h2>Quick Links</h2>
+        <p>
+            <a href="http://localhost:5000/api/health" target="_blank">Health Check API</a> |
+            <a href="http://localhost:5000/api/auth/register" target="_blank">Register API</a> |
+            <a href="http://localhost:5000/api/weather/current" target="_blank">Weather API</a>
+        </p>
+
+        <div class="status info">
+            <strong>Note:</strong> This is a temporary test page while we fix the React frontend. 
+            The backend is running on port 5000 and connected to MongoDB Atlas.
+        </div>
+    </div>
+
+    <script>
+        // Test server health
+        async function testHealth() {
+            try {
+                const response = await fetch('http://localhost:5000/api/health');
+                const data = await response.json();
+                showResponse('Health Check', data);
+                document.getElementById('server-status').textContent = '✅ Running';
+                document.getElementById('server-status').style.color = 'green';
+            } catch (error) {
+                showResponse('Health Check Error', error.message);
+                document.getElementById('server-status').textContent = '❌ Not Running';
+                document.getElementById('server-status').style.color = 'red';
+            }
+        }
+
+        // Test authentication
+        async function testAuth() {
+            try {
+                const response = await fetch('http://localhost:5000/api/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: 'Test User',
+                        email: 'test@example.com',
+                        password: 'testpassword123'
+                    })
+                });
+                const data = await response.json();
+                showResponse('Authentication Test', data);
+            } catch (error) {
+                showResponse('Authentication Error', error.message);
+            }
+        }
+
+        // Test weather API
+        async function testWeather() {
+            try {
+                const response = await fetch('http://localhost:5000/api/weather/current?lat=40.7128&lon=-74.0060');
+                const data = await response.json();
+                showResponse('Weather API Test', data);
+            } catch (error) {
+                showResponse('Weather API Error', error.message);
+            }
+        }
+
+        // Test location API
+        async function testLocation() {
+            try {
+                const response = await fetch('http://localhost:5000/api/location/geocode?location=New York');
+                const data = await response.json();
+                showResponse('Location API Test', data);
+            } catch (error) {
+                showResponse('Location API Error', error.message);
+            }
+        }
+
+        function showResponse(title, data) {
+            const responseDiv = document.getElementById('response');
+            responseDiv.style.display = 'block';
+            responseDiv.innerHTML = `<strong>${title}:</strong>\n${JSON.stringify(data, null, 2)}`;
+        }
+
+        // Auto-test health on page load
+        window.onload = function() {
+            testHealth();
+        };
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+

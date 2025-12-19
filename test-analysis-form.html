@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analysis Form Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+        }
+        .error {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .location-type {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .location-type button {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: #f8f9fa;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .location-type button.active {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        button[type="submit"] {
+            background: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button[type="submit"]:hover {
+            background: #0056b3;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛰️ Analysis Form Test</h1>
+        <p>This page tests the analysis form validation to ensure it works correctly.</p>
+        
+        <form id="analysisForm">
+            <div class="form-group">
+                <label for="title">Analysis Title *</label>
+                <input type="text" id="title" name="title" placeholder="Enter analysis title" required>
+                <div id="titleError" class="error"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Location Type</label>
+                <div class="location-type">
+                    <button type="button" class="location-type-btn active" data-type="city">City Name</button>
+                    <button type="button" class="location-type-btn" data-type="coordinates">Coordinates</button>
+                    <button type="button" class="location-type-btn" data-type="pincode">Postal Code</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="location">Location *</label>
+                <input type="text" id="location" name="location" placeholder="Enter city name (e.g., New York)" required>
+                <div id="locationError" class="error"></div>
+                <div id="locationHelp" class="help-text">Enter the name of a city or location</div>
+            </div>
+
+            <button type="submit">Start Analysis</button>
+        </form>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        let currentLocationType = 'city';
+        
+        // Location type buttons
+        document.querySelectorAll('.location-type-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                // Remove active class from all buttons
+                document.querySelectorAll('.location-type-btn').forEach(b => b.classList.remove('active'));
+                // Add active class to clicked button
+                this.classList.add('active');
+                
+                currentLocationType = this.dataset.type;
+                const locationInput = document.getElementById('location');
+                const locationHelp = document.getElementById('locationHelp');
+                
+                // Update placeholder and help text
+                switch(currentLocationType) {
+                    case 'city':
+                        locationInput.placeholder = 'Enter city name (e.g., New York)';
+                        locationHelp.textContent = 'Enter the name of a city or location';
+                        break;
+                    case 'coordinates':
+                        locationInput.placeholder = 'Enter coordinates (e.g., 40.7128, -74.0060)';
+                        locationHelp.textContent = 'Enter latitude and longitude separated by a comma';
+                        break;
+                    case 'pincode':
+                        locationInput.placeholder = 'Enter postal code (e.g., 10001)';
+                        locationHelp.textContent = 'Enter a 5 or 6 digit postal code';
+                        break;
+                }
+                
+                // Clear any existing errors
+                document.getElementById('locationError').textContent = '';
+            });
+        });
+
+        // Form validation
+        function validateForm() {
+            let isValid = true;
+            
+            // Clear previous errors
+            document.getElementById('titleError').textContent = '';
+            document.getElementById('locationError').textContent = '';
+            
+            // Validate title
+            const title = document.getElementById('title').value.trim();
+            if (!title) {
+                document.getElementById('titleError').textContent = 'Title is required';
+                isValid = false;
+            } else if (title.length < 3) {
+                document.getElementById('titleError').textContent = 'Title must be at least 3 characters';
+                isValid = false;
+            } else if (title.length > 100) {
+                document.getElementById('titleError').textContent = 'Title must be less than 100 characters';
+                isValid = false;
+            }
+            
+            // Validate location
+            const location = document.getElementById('location').value.trim();
+            if (!location) {
+                document.getElementById('locationError').textContent = 'Location is required';
+                isValid = false;
+            } else {
+                // Validate based on location type
+                if (currentLocationType === 'coordinates') {
+                    const coordPattern = /^-?\d+\.?\d*,\s*-?\d+\.?\d*$/;
+                    if (!coordPattern.test(location)) {
+                        document.getElementById('locationError').textContent = 'Please enter valid coordinates (e.g., 40.7128, -74.0060)';
+                        isValid = false;
+                    }
+                } else if (currentLocationType === 'pincode') {
+                    const pincodePattern = /^\d{5,6}$/;
+                    if (!pincodePattern.test(location)) {
+                        document.getElementById('locationError').textContent = 'Please enter a valid postal code (5-6 digits)';
+                        isValid = false;
+                    }
+                } else if (currentLocationType === 'city') {
+                    if (location.length < 2) {
+                        document.getElementById('locationError').textContent = 'City name must be at least 2 characters';
+                        isValid = false;
+                    }
+                }
+            }
+            
+            return isValid;
+        }
+
+        // Form submission
+        document.getElementById('analysisForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            if (validateForm()) {
+                const formData = {
+                    title: document.getElementById('title').value.trim(),
+                    location: document.getElementById('location').value.trim(),
+                    locationType: currentLocationType
+                };
+                
+                document.getElementById('result').innerHTML = `
+                    <div class="success">
+                        ✅ Form validation passed!<br>
+                        <strong>Title:</strong> ${formData.title}<br>
+                        <strong>Location:</strong> ${formData.location}<br>
+                        <strong>Type:</strong> ${formData.locationType}
+                    </div>
+                `;
+            } else {
+                document.getElementById('result').innerHTML = `
+                    <div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin-top: 20px;">
+                        ❌ Please fix the validation errors above.
+                    </div>
+                `;
+            }
+        });
+
+        // Real-time validation
+        document.getElementById('title').addEventListener('input', function() {
+            if (this.value.trim()) {
+                document.getElementById('titleError').textContent = '';
+            }
+        });
+
+        document.getElementById('location').addEventListener('input', function() {
+            if (this.value.trim()) {
+                document.getElementById('locationError').textContent = '';
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
