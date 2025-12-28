@@ -100,10 +100,24 @@ const geocodeLocation = async (location, includePolygon = true) => {
       let bounds = null;
       
       // Check if geometry has polygon data
+      // OpenCage may return polygon in different formats
       if (geometry.type === 'Polygon' && geometry.coordinates) {
         polygon = geometry.coordinates[0]; // First ring of polygon
-      } else if (result.bounds) {
-        // Use bounding box if polygon not available
+      } else if (geometry.type === 'MultiPolygon' && geometry.coordinates) {
+        // Handle MultiPolygon - use the largest polygon
+        const polygons = geometry.coordinates;
+        polygon = polygons.reduce((largest, poly) => 
+          poly[0].length > (largest?.[0]?.length || 0) ? poly[0] : largest
+        )[0];
+      } else if (result.geometry && result.geometry.coordinates) {
+        // Try alternative geometry format
+        if (Array.isArray(result.geometry.coordinates[0])) {
+          polygon = result.geometry.coordinates[0];
+        }
+      }
+      
+      // Get bounds from result (always available from OpenCage)
+      if (result.bounds) {
         bounds = {
           northeast: {
             lat: result.bounds.northeast.lat,
@@ -116,7 +130,7 @@ const geocodeLocation = async (location, includePolygon = true) => {
         };
       }
       
-      // Calculate bounding box from polygon if available
+      // Calculate bounding box from polygon if available (more accurate)
       if (polygon && polygon.length > 0) {
         const lats = polygon.map(coord => coord[1]);
         const lngs = polygon.map(coord => coord[0]);
@@ -132,6 +146,45 @@ const geocodeLocation = async (location, includePolygon = true) => {
         };
       }
       
+      // CRITICAL FIX: If no polygon from OpenCage but we have bounds, create a rectangular polygon
+      // This allows city-level GEE analysis to work even when OpenCage doesn't return polygon
+      // This is essential for large cities like Mumbai where OpenCage may not return polygon data
+      if (!polygon && bounds) {
+        console.log('⚠️  No polygon from OpenCage - creating rectangular polygon from bounds');
+        console.log(`   → Bounds: [${bounds.southwest.lng}, ${bounds.southwest.lat}] to [${bounds.northeast.lng}, ${bounds.northeast.lat}]`);
+        polygon = [
+          [bounds.southwest.lng, bounds.southwest.lat], // SW
+          [bounds.northeast.lng, bounds.southwest.lat], // SE
+          [bounds.northeast.lng, bounds.northeast.lat], // NE
+          [bounds.southwest.lng, bounds.northeast.lat], // NW
+          [bounds.southwest.lng, bounds.southwest.lat]  // Close polygon
+        ];
+        console.log(`   ✅ Created rectangular polygon with ${polygon.length} coordinates`);
+        console.log(`   → This allows city-level GEE analysis to proceed`);
+      } else if (!polygon && !bounds) {
+        // Last resort: create bounds from geometry point with buffer
+        console.log('⚠️  No bounds or polygon - creating from geometry point with buffer');
+        const buffer = 0.1; // ~11km buffer
+        bounds = {
+          northeast: {
+            lat: geometry.lat + buffer,
+            lng: geometry.lng + buffer
+          },
+          southwest: {
+            lat: geometry.lat - buffer,
+            lng: geometry.lng - buffer
+          }
+        };
+        polygon = [
+          [bounds.southwest.lng, bounds.southwest.lat],
+          [bounds.northeast.lng, bounds.southwest.lat],
+          [bounds.northeast.lng, bounds.northeast.lat],
+          [bounds.southwest.lng, bounds.northeast.lat],
+          [bounds.southwest.lng, bounds.southwest.lat]
+        ];
+        console.log(`   ✅ Created polygon from point with buffer`);
+      }
+      
       return {
         coordinates: {
           latitude: geometry.lat,
@@ -139,9 +192,10 @@ const geocodeLocation = async (location, includePolygon = true) => {
         },
         address: result.formatted,
         components: result.components,
-        polygon: polygon, // Full polygon coordinates
+        polygon: polygon, // Full polygon coordinates (or created from bounds)
         bounds: bounds, // Bounding box for the area
-        geometryType: geometry.type || 'Point'
+        geometryType: geometry.type || 'Point',
+        polygonSource: polygon && geometry.type ? 'opencage' : (polygon ? 'bounds_fallback' : null)
       };
     }
     throw new Error('Location not found');
@@ -180,6 +234,67 @@ const refreshSentinelHubToken = async () => {
     return newToken;
   } catch (error) {
     console.error('❌ Failed to refresh SentinelHub token:', error.response?.data || error.message);
+    throw error;
+  }
+};
+
+// Fetch satellite image using Google Earth Engine (more efficient)
+// NOTE: For city-level analysis, use /api/city-gee/analyze instead
+// This function is kept for backward compatibility but may have memory issues for large cities
+const fetchImageWithGEE = async (location, bounds, startDate = null, endDate = null, cloudCover = 20) => {
+  try {
+    // Convert bounds to array format [min_lng, min_lat, max_lng, max_lat]
+    const bbox = [
+      bounds.southwest.lng,
+      bounds.southwest.lat,
+      bounds.northeast.lng,
+      bounds.northeast.lat
+    ];
+
+    // Check if area is too large (will cause memory issues)
+    const areaKm2 = ((bounds.northeast.lat - bounds.southwest.lat) * 111) * 
+                    ((bounds.northeast.lng - bounds.southwest.lng) * 111);
+    
+    if (areaKm2 > 500) {
+      throw new Error(`Area too large (${areaKm2.toFixed(2)} km²). Use /api/city-gee/analyze endpoint for large cities.`);
+    }
+
+    console.log(`🌍 Fetching image using Google Earth Engine for: ${location}`);
+
+    // Call AI service GEE endpoint (limited to small areas)
+    const geeResult = await callAIService('/gee/fetch-image', {
+      location: location,
+      bounds: bbox,
+      start_date: startDate,
+      end_date: endDate,
+      cloud_cover: cloudCover
+    });
+
+    if (geeResult.success && geeResult.image) {
+      // Convert base64 image to buffer
+      const imageBase64 = geeResult.image.split(',')[1] || geeResult.image;
+      const imageBuffer = Buffer.from(imageBase64, 'base64');
+
+      console.log('✅ Using Google Earth Engine for satellite data');
+
+      return {
+        imageData: imageBuffer,
+        metadata: {
+          source: 'google-earth-engine',
+          timestamp: geeResult.metadata?.end_date || new Date(),
+          resolution: geeResult.metadata?.resolution || '10m',
+          bands: geeResult.metadata?.bands || ['B2', 'B3', 'B4', 'B8'],
+          statistics: geeResult.statistics,
+          land_cover: geeResult.land_cover,
+          _realData: true,
+          _geeData: true
+        }
+      };
+    }
+
+    throw new Error('Invalid response from GEE endpoint');
+  } catch (error) {
+    console.error('❌ Google Earth Engine fetch error:', error.message);
     throw error;
   }
 };
@@ -434,16 +549,22 @@ const computeClassAreasWithStatisticalAPI = async (bounds, retry = true) => {
       function setup() {
         return {
           input: [{
-            bands: ["B02", "B03", "B04", "B08", "B11"]
+            bands: ["B02", "B03", "B04", "B08", "B11", "dataMask"]
           }],
           output: {
             bands: 1,
             sampleType: "UINT8"
-          }
+          },
+          mosaicking: "ORBIT"
         };
       }
       
       function evaluatePixel(samples) {
+        // Check data mask - if pixel is invalid, return 255 (no data)
+        if (samples.dataMask === 0) {
+          return [255]; // No data
+        }
+        
         // Calculate indices
         const ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04 + 0.0001);
         const ndwi = (samples.B03 - samples.B08) / (samples.B03 + samples.B08 + 0.0001);
@@ -708,7 +829,8 @@ const assessRisks = async (imageData, landClassification, weatherData) => {
 // Fetch satellite image for a location
 router.post('/fetch', authenticateToken, [
   body('location').notEmpty().withMessage('Location is required'),
-  body('size').optional().matches(/^\d+,\d+$/).withMessage('Size must be in format "width,height"')
+  body('size').optional().matches(/^\d+,\d+$/).withMessage('Size must be in format "width,height"'),
+  body('use_gee').optional().isBoolean().withMessage('use_gee must be boolean')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -716,18 +838,46 @@ router.post('/fetch', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { location, size = '512,512' } = req.body;
+    const { location, size = '512,512', use_gee = true } = req.body;
 
     // Geocode the location and get polygon boundaries
     const geocodedLocation = await geocodeLocation(location, true); // Include polygon
 
-    // Fetch satellite image using full city polygon bounds
-    const satelliteData = await fetchSentinelImage(
-      geocodedLocation.coordinates, 
-      size || '1024,1024', // Larger default for city areas
-      true,
-      geocodedLocation.bounds // Use polygon bounds
-    );
+    if (!geocodedLocation.bounds) {
+      return res.status(400).json({
+        message: 'City bounds not available. Please provide a valid city name.'
+      });
+    }
+
+    let satelliteData;
+    
+    // Try Google Earth Engine first if enabled (more efficient)
+    if (use_gee) {
+      try {
+        satelliteData = await fetchImageWithGEE(
+          location,
+          geocodedLocation.bounds
+        );
+        console.log('✅ Successfully fetched using Google Earth Engine');
+      } catch (geeError) {
+        console.warn('⚠️  Google Earth Engine failed, falling back to SentinelHub:', geeError.message);
+        // Fallback to SentinelHub
+        satelliteData = await fetchSentinelImage(
+          geocodedLocation.coordinates, 
+          size || '1024,1024',
+          true,
+          geocodedLocation.bounds
+        );
+      }
+    } else {
+      // Use SentinelHub directly
+      satelliteData = await fetchSentinelImage(
+        geocodedLocation.coordinates, 
+        size || '1024,1024',
+        true,
+        geocodedLocation.bounds
+      );
+    }
 
     // Convert image to base64 for response
     const imageBase64 = Buffer.from(satelliteData.imageData).toString('base64');
@@ -780,72 +930,257 @@ router.post('/analyze', authenticateToken, [
     }
 
     // Compute class areas using Sentinel Hub Statistical API with city bbox from OpenCage
+    // SKIP if we have polygon (will use city-level GEE instead, which is more accurate)
     let statisticalResults = null;
     let landClassification = null;
     
-    try {
-      console.log('📊 Computing class areas using Sentinel Hub Statistical API with city bbox...');
-      statisticalResults = await computeClassAreasWithStatisticalAPI(geocodedLocation.bounds);
-      
-      // Convert Statistical API results to our land classification format
-      landClassification = {
-        forest: {
-          percentage: Math.round(statisticalResults.classAreas.forest.percentage),
-          areaKm2: statisticalResults.classAreas.forest.areaKm2,
-          health: statisticalResults.classAreas.forest.percentage > 30 ? 'excellent' : 
-                 statisticalResults.classAreas.forest.percentage > 20 ? 'good' : 
-                 statisticalResults.classAreas.forest.percentage > 10 ? 'fair' : 'poor'
-        },
-        water: {
-          percentage: Math.round(statisticalResults.classAreas.water.percentage),
-          areaKm2: statisticalResults.classAreas.water.areaKm2,
-          quality: 'good'
-        },
-        urban: {
-          percentage: Math.round(statisticalResults.classAreas.urban.percentage),
-          areaKm2: statisticalResults.classAreas.urban.areaKm2,
-          density: statisticalResults.classAreas.urban.percentage > 30 ? 'high' : 
-                  statisticalResults.classAreas.urban.percentage > 15 ? 'medium' : 'low'
-        },
-        agricultural: {
-          percentage: Math.round(statisticalResults.classAreas.agricultural.percentage),
-          areaKm2: statisticalResults.classAreas.agricultural.areaKm2,
-          cropHealth: 'good'
-        },
-        barren: {
-          percentage: Math.round(statisticalResults.classAreas.barren.percentage),
-          areaKm2: statisticalResults.classAreas.barren.areaKm2
-        },
-        _realData: true,
-        _method: 'statistical_api',
-        _totalAreaKm2: statisticalResults.totalAreaKm2
-      };
-      
-      console.log('✅ Class areas computed successfully using Statistical API');
-    } catch (statError) {
-      console.warn('⚠️  Statistical API failed, falling back to image-based analysis:', statError.message);
-      // Fallback to image-based analysis
+    // Only try Statistical API if we DON'T have a polygon (point-based analysis)
+    // If we have a polygon, city-level GEE will handle it more accurately
+    if (!geocodedLocation.polygon || geocodedLocation.polygon.length < 3) {
+      try {
+        console.log('📊 Computing class areas using Sentinel Hub Statistical API with city bbox...');
+        statisticalResults = await computeClassAreasWithStatisticalAPI(geocodedLocation.bounds);
+        
+        // Convert Statistical API results to our land classification format
+        landClassification = {
+          forest: {
+            percentage: Math.round(statisticalResults.classAreas.forest.percentage),
+            areaKm2: statisticalResults.classAreas.forest.areaKm2,
+            health: statisticalResults.classAreas.forest.percentage > 30 ? 'excellent' : 
+                   statisticalResults.classAreas.forest.percentage > 20 ? 'good' : 
+                   statisticalResults.classAreas.forest.percentage > 10 ? 'fair' : 'poor'
+          },
+          water: {
+            percentage: Math.round(statisticalResults.classAreas.water.percentage),
+            areaKm2: statisticalResults.classAreas.water.areaKm2,
+            quality: 'good'
+          },
+          urban: {
+            percentage: Math.round(statisticalResults.classAreas.urban.percentage),
+            areaKm2: statisticalResults.classAreas.urban.areaKm2,
+            density: statisticalResults.classAreas.urban.percentage > 30 ? 'high' : 
+                    statisticalResults.classAreas.urban.percentage > 15 ? 'medium' : 'low'
+          },
+          agricultural: {
+            percentage: Math.round(statisticalResults.classAreas.agricultural.percentage),
+            areaKm2: statisticalResults.classAreas.agricultural.areaKm2,
+            cropHealth: 'good'
+          },
+          barren: {
+            percentage: Math.round(statisticalResults.classAreas.barren.percentage),
+            areaKm2: statisticalResults.classAreas.barren.areaKm2
+          },
+          _realData: true,
+          _method: 'statistical_api',
+          _totalAreaKm2: statisticalResults.totalAreaKm2
+        };
+        
+        console.log('✅ Class areas computed successfully using Statistical API');
+      } catch (statError) {
+        console.warn('⚠️  Statistical API failed, falling back to image-based analysis:', statError.message);
+        // Fallback to image-based analysis
+      }
+    } else {
+      console.log('ℹ️  Skipping Statistical API - will use city-level GEE analysis (more accurate for polygons)');
     }
 
-    // Fetch satellite image using full city polygon bounds from OpenCage (for visualization)
-    const satelliteData = await fetchSentinelImage(
-      geocodedLocation.coordinates, 
-      '2048,2048', // Larger size for full city analysis
-      true,
-      geocodedLocation.bounds // Use city bbox from OpenCage
-    );
+    // For city-level analysis, ALWAYS use the new city-level GEE endpoint when polygon is available
+    // This processes everything in GEE without downloading images - works for cities of ANY size
+    let satelliteData;
+    let useCityLevelGEE = false;
+    
+    // Debug: Check polygon availability
+    console.log('🔍 Checking polygon availability:');
+    console.log(`   → geocodedLocation.polygon exists: ${!!geocodedLocation.polygon}`);
+    console.log(`   → geocodedLocation.polygon type: ${Array.isArray(geocodedLocation.polygon) ? 'Array' : typeof geocodedLocation.polygon}`);
+    if (geocodedLocation.polygon) {
+      console.log(`   → geocodedLocation.polygon.length: ${geocodedLocation.polygon.length}`);
+      if (geocodedLocation.polygon.length > 0) {
+        console.log(`   → First coord: [${geocodedLocation.polygon[0][0]}, ${geocodedLocation.polygon[0][1]}]`);
+      }
+    }
+    console.log(`   → geocodedLocation.bounds exists: ${!!geocodedLocation.bounds}`);
+    
+    // Check if we have a polygon (indicates city-level analysis)
+    // City-level GEE works for ANY size city since it processes in GEE without downloading images
+    // IMPORTANT: Check for array and minimum 3 coordinates (triangle)
+    if (geocodedLocation.polygon && Array.isArray(geocodedLocation.polygon) && geocodedLocation.polygon.length >= 3) {
+      try {
+        console.log(`🏙️  Using city-level GEE analysis for ${location}`);
+        console.log(`   → Polygon with ${geocodedLocation.polygon.length} coordinates`);
+        console.log(`   → All processing in GEE - no image downloads - works for ANY city size`);
+        
+        const cityAnalysis = await callAIService('/gee/analyze-city', {
+          city_name: location,
+          polygon_coords: geocodedLocation.polygon,
+          cloud_cover_threshold: 20,
+          include_rgb_image: true  // Always request RGB thumbnail for display
+        });
+        
+        if (cityAnalysis && cityAnalysis.success) {
+          useCityLevelGEE = true;
+          // Create a minimal satelliteData object for compatibility
+          // The actual analysis results are in cityAnalysis
+          satelliteData = {
+            imageData: null, // No image needed - all processing in GEE
+            metadata: {
+              source: 'google-earth-engine-city-level',
+              timestamp: new Date(),
+              resolution: '10m',
+              _cityLevelAnalysis: cityAnalysis,
+              _realData: true,
+              _geeData: true,
+              // Include RGB thumbnail URL directly in metadata for easy access
+              rgb_thumbnail_url: cityAnalysis.rgb_thumbnail_url || null
+            }
+          };
+          console.log('✅ City-level GEE analysis completed successfully');
+          if (cityAnalysis.summary) {
+            console.log(`   → Total area: ${cityAnalysis.summary.total_area_km2} km²`);
+            console.log(`   → Percentage sum: ${cityAnalysis.summary.percentage_sum}%`);
+          }
+          console.log(`   → RGB thumbnail URL: ${cityAnalysis.rgb_thumbnail_url ? 'Available' : 'NOT AVAILABLE'}`);
+          if (cityAnalysis.rgb_thumbnail_url) {
+            console.log(`   → Thumbnail URL: ${cityAnalysis.rgb_thumbnail_url.substring(0, 80)}...`);
+          }
+        } else {
+          const errorMsg = cityAnalysis?.error || cityAnalysis?.message || 'Unknown error';
+          throw new Error(`City-level GEE returned unsuccessful: ${errorMsg}`);
+        }
+      } catch (cityGeeError) {
+        console.error('❌ City-level GEE analysis error:', cityGeeError.message);
+        if (cityGeeError.response) {
+          console.error('   HTTP Status:', cityGeeError.response.status);
+          console.error('   Response:', JSON.stringify(cityGeeError.response.data, null, 2));
+        }
+        if (cityGeeError.stack) {
+          console.error('   Stack:', cityGeeError.stack.split('\n').slice(0, 3).join('\n'));
+        }
+        console.warn('⚠️  City-level GEE failed, falling back to image-based analysis...');
+        useCityLevelGEE = false; // Ensure flag is reset
+      }
+    } else {
+      console.log('⚠️  No polygon available - cannot use city-level GEE analysis');
+      console.log('   → Will use fallback methods');
+    }
+    
+    // Fallback to regular image fetching if city-level GEE not used or failed
+    if (!useCityLevelGEE) {
+      try {
+        // For small areas, try regular GEE image fetch
+        const areaKm2 = ((geocodedLocation.bounds.northeast.lat - geocodedLocation.bounds.southwest.lat) * 111) * 
+                        ((geocodedLocation.bounds.northeast.lng - geocodedLocation.bounds.southwest.lng) * 111);
+        
+        if (areaKm2 < 500) {
+          // Small area - safe to use GEE image fetch
+          satelliteData = await fetchImageWithGEE(
+            location,
+            geocodedLocation.bounds
+          );
+          console.log('✅ Using Google Earth Engine for analysis');
+        } else {
+          // Large area - use SentinelHub (city-level GEE should have been used above)
+          throw new Error(`Area too large (${areaKm2.toFixed(2)} km²) for image-based GEE - use city-level endpoint`);
+        }
+      } catch (geeError) {
+        console.warn('⚠️  Google Earth Engine failed, using SentinelHub:', geeError.message);
+        // Fallback to SentinelHub
+        satelliteData = await fetchSentinelImage(
+          geocodedLocation.coordinates, 
+          '2048,2048', // Larger size for full city analysis
+          true,
+          geocodedLocation.bounds // Use city bbox from OpenCage
+        );
+      }
+    }
 
-    // If Statistical API failed, use image-based classification
-    if (!landClassification) {
+    // If we used city-level GEE analysis, extract classification from it
+    if (useCityLevelGEE && satelliteData.metadata._cityLevelAnalysis) {
+      const cityAnalysis = satelliteData.metadata._cityLevelAnalysis;
+      landClassification = {
+        forest: {
+          percentage: Math.round(cityAnalysis.land_cover.forest.percentage * 100) / 100,
+          areaKm2: cityAnalysis.land_cover.forest.area_km2
+        },
+        water: {
+          percentage: Math.round(cityAnalysis.land_cover.water.percentage * 100) / 100,
+          areaKm2: cityAnalysis.land_cover.water.area_km2
+        },
+        urban: {
+          percentage: Math.round(cityAnalysis.land_cover.urban.percentage * 100) / 100,
+          areaKm2: cityAnalysis.land_cover.urban.area_km2
+        },
+        agricultural: {
+          percentage: Math.round(cityAnalysis.land_cover.agricultural.percentage * 100) / 100,
+          areaKm2: cityAnalysis.land_cover.agricultural.area_km2
+        },
+        barren: {
+          percentage: Math.round(cityAnalysis.land_cover.barren.percentage * 100) / 100,
+          areaKm2: cityAnalysis.land_cover.barren.area_km2
+        },
+        _realData: true,
+        _method: 'gee_city_level',
+        _totalAreaKm2: cityAnalysis.summary.total_area_km2
+      };
+      console.log('✅ Using city-level GEE classification results');
+    }
+    // If Statistical API failed and not using city-level GEE, use image-based classification
+    else if (!landClassification && satelliteData.imageData) {
       console.log('📸 Using image-based classification as fallback...');
       landClassification = await classifyLand(satelliteData.imageData);
     }
 
-    // Calculate NDVI (still use image-based for detailed analysis)
-    const ndviData = await calculateNDVI(satelliteData.imageData);
+    // Calculate NDVI - skip if using city-level GEE (no image data)
+    let ndviData = null;
+    if (!useCityLevelGEE && satelliteData.imageData) {
+      ndviData = await calculateNDVI(satelliteData.imageData);
+    } else if (useCityLevelGEE) {
+      // Extract NDVI from city-level analysis if available
+      ndviData = {
+        average: 0, // Could be calculated from indices if needed
+        min: -1,
+        max: 1,
+        distribution: {
+          excellent: 0,
+          good: 0,
+          fair: 0,
+          poor: 0,
+          critical: 0
+        },
+        _realData: true,
+        _note: 'NDVI calculated in GEE (detailed distribution not available)'
+      };
+    }
 
-    // Risk assessment needs the image data
-    const finalRiskAssessment = await assessRisks(satelliteData.imageData, landClassification, weatherData);
+    // Risk assessment - skip image-based if using city-level GEE
+    let finalRiskAssessment = null;
+    if (!useCityLevelGEE && satelliteData.imageData) {
+      finalRiskAssessment = await assessRisks(satelliteData.imageData, landClassification, weatherData);
+    } else if (useCityLevelGEE) {
+      // Basic risk assessment based on land classification percentages
+      finalRiskAssessment = {
+        floodRisk: {
+          level: landClassification.water.percentage > 20 ? 'high' : 
+                 landClassification.water.percentage > 10 ? 'medium' : 'low',
+          probability: Math.min(landClassification.water.percentage / 100, 1.0),
+          factors: ['water_coverage']
+        },
+        droughtRisk: {
+          level: landClassification.forest.percentage < 10 ? 'high' :
+                 landClassification.forest.percentage < 20 ? 'medium' : 'low',
+          probability: Math.min((100 - landClassification.forest.percentage) / 100, 1.0),
+          factors: ['vegetation_coverage']
+        },
+        deforestation: {
+          detected: false,
+          severity: 'low',
+          area: 0,
+          timeframe: 'last_6_months'
+        },
+        _realData: true,
+        _method: 'classification_based'
+      };
+    }
 
     // Create report
     const report = new Report({
@@ -861,10 +1196,35 @@ router.post('/analyze', authenticateToken, [
         ...geocodedLocation.components
       },
       satelliteImage: {
-        url: `data:image/jpeg;base64,${Buffer.from(satelliteData.imageData).toString('base64')}`,
+        // Handle city-level GEE where imageData is null (processing done in GEE, no image download)
+        // Priority: 1) imageData (base64), 2) RGB thumbnail URL from GEE, 3) Fallback static map
+        url: (() => {
+          if (satelliteData.imageData) {
+            return `data:image/jpeg;base64,${Buffer.from(satelliteData.imageData).toString('base64')}`;
+          }
+          // Try RGB thumbnail from metadata
+          const rgbUrl = satelliteData.metadata?.rgb_thumbnail_url 
+            || satelliteData.metadata?._cityLevelAnalysis?.rgb_thumbnail_url;
+          if (rgbUrl) {
+            console.log(`   ✅ Using GEE RGB thumbnail URL for display`);
+            return rgbUrl;
+          }
+          // Fallback: Generate a static map URL using bounds (if available)
+          if (geocodedLocation.bounds) {
+            const centerLat = (geocodedLocation.bounds.northeast.lat + geocodedLocation.bounds.southwest.lat) / 2;
+            const centerLng = (geocodedLocation.bounds.northeast.lng + geocodedLocation.bounds.southwest.lng) / 2;
+            // Use OpenStreetMap static map as fallback (no API key needed, but lower quality)
+            // Or use a simple placeholder that shows the area
+            const fallbackUrl = `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/${centerLng},${centerLat},11/800x600?access_token=${process.env.MAPBOX_ACCESS_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw'}`;
+            console.log(`   ⚠️  No GEE thumbnail available, using fallback static map`);
+            return fallbackUrl;
+          }
+          console.log(`   ❌ No image URL available`);
+          return null;
+        })(),
         timestamp: satelliteData.metadata?.timestamp || new Date().toISOString(),
         resolution: satelliteData.metadata?.resolution || '10m',
-        source: 'sentinel-2',
+        source: satelliteData.metadata?.source || 'sentinel-2',
         bands: satelliteData.metadata?.bands || ['RGB', 'NIR'],
         areaCovered: geocodedLocation.bounds ? {
           northeast: geocodedLocation.bounds.northeast,

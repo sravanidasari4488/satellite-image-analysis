@@ -139,7 +139,7 @@ const reportSchema = new mongoose.Schema({
     resolution: String,
     source: {
       type: String,
-      enum: ['sentinel', 'sentinel-2', 'sentinel-1', 'landsat', 'landsat-8', 'google_earth', 'user_provided']
+      enum: ['sentinel', 'sentinel-2', 'sentinel-1', 'landsat', 'landsat-8', 'google_earth', 'google-earth-engine-city-level', 'user_provided']
     },
     bands: [String]
   },

@@ -100,7 +100,22 @@ class CityAnalysisPipeline:
                         self.rf_model = pickle.load(f)
                     logger.info("Loaded Random Forest fallback model")
                 except Exception as e:
-                    logger.warning(f"Failed to load RF model: {e}")
+                    # Version mismatch warnings are expected - models work but may have minor differences
+                    if "InconsistentVersionWarning" in str(type(e).__name__) or "version" in str(e).lower():
+                        logger.warning(f"RF model version mismatch (non-critical): {e}")
+                        logger.info("   → Model will still work, but consider updating scikit-learn to match model version")
+                        # Try to load anyway - it usually still works
+                        try:
+                            import warnings
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore")
+                                with open(rf_path, 'rb') as f:
+                                    self.rf_model = pickle.load(f)
+                                logger.info("   → RF model loaded despite version warning")
+                        except:
+                            pass
+                    else:
+                        logger.warning(f"Failed to load RF model: {e}")
     
     def analyze_city(self, 
                     location: str,

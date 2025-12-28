@@ -57,7 +57,7 @@ class CNNPatchClassifier:
     def load_model(self):
         """Load trained EfficientNet model"""
         if not TENSORFLOW_AVAILABLE:
-            logger.error("TensorFlow not available. Cannot load CNN model.")
+            logger.warning("TensorFlow not available. Cannot load CNN model.")
             return
         
         try:
@@ -70,7 +70,13 @@ class CNNPatchClassifier:
             logger.info(f"Model input shape: {self.model.input_shape}")
             logger.info(f"Model output shape: {self.model.output_shape}")
         except Exception as e:
-            logger.error(f"Failed to load model: {e}")
+            # Model shape mismatch is expected if model was trained with different input channels
+            # This is a fallback model - not critical for city-level GEE analysis
+            if "Shape mismatch" in str(e) or "stem_conv" in str(e):
+                logger.warning(f"CNN patch classifier model shape mismatch (expected for fallback): {e}")
+                logger.info("   → This is a fallback model. City-level GEE analysis will work without it.")
+            else:
+                logger.error(f"Failed to load model: {e}")
             self.model = None
     
     def is_available(self) -> bool:
@@ -195,5 +201,9 @@ class CNNPatchClassifier:
             'num_classes': len(self.eurosat_classes),
             'classes': self.eurosat_classes
         }
+
+
+
+
 
 

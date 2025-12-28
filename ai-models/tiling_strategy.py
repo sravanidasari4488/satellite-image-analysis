@@ -123,3 +123,7 @@ class SlidingWindowTiler:
         return min(coverage, 1.0)
 
 
+
+
+
+

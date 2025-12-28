@@ -32,6 +32,22 @@ CORS(app)
 model = LandClassificationModel()  # Legacy pixel-based model
 multispectral_analyzer = MultispectralAnalyzer()  # New ML-driven multispectral analyzer
 
+# Initialize Google Earth Engine integration
+gee_integration = None
+try:
+    from gee_integration import GoogleEarthEngineIntegration
+    gee_integration = GoogleEarthEngineIntegration()
+    if gee_integration.initialized:
+        logger.info("Google Earth Engine integration initialized")
+    else:
+        logger.warning("Google Earth Engine not fully initialized - some features may be unavailable")
+except ImportError as e:
+    logger.warning(f"Google Earth Engine integration not available: {e}")
+    gee_integration = None
+except Exception as e:
+    logger.warning(f"Failed to initialize Google Earth Engine: {e}")
+    gee_integration = None
+
 # Initialize city pipeline if available
 city_pipeline = None
 try:
@@ -44,6 +60,16 @@ except ImportError as e:
 except Exception as e:
     logger.warning(f"Failed to initialize city pipeline: {e}")
     city_pipeline = None
+
+# Initialize city-level GEE analyzer
+try:
+    from city_gee_endpoint import create_city_analysis_endpoint
+    create_city_analysis_endpoint(app)
+    logger.info("City-level GEE analysis endpoint registered")
+except ImportError as e:
+    logger.warning(f"City-level GEE endpoint not available: {e}")
+except Exception as e:
+    logger.warning(f"Failed to register city-level GEE endpoint: {e}")
 
 def decode_image(image_data: str) -> np.ndarray:
     """Decode base64 image data to numpy array"""
@@ -729,6 +755,360 @@ def analyze_city():
         
     except Exception as e:
         logger.error(f"City analysis error: {e}", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'type': type(e).__name__
+        }), 500
+
+@app.route('/gee/fetch-image', methods=['POST'])
+def gee_fetch_image():
+    """
+    Fetch satellite image using Google Earth Engine
+    
+    Expected JSON payload:
+    {
+        "location": "City name",
+        "bounds": [min_lng, min_lat, max_lng, max_lat],
+        "start_date": "YYYY-MM-DD" (optional),
+        "end_date": "YYYY-MM-DD" (optional),
+        "cloud_cover": 20 (optional)
+    }
+    """
+    try:
+        if not gee_integration or not gee_integration.initialized:
+            return jsonify({
+                'error': 'Google Earth Engine not initialized. Please configure GEE credentials.',
+                'type': 'GEEInitializationError'
+            }), 503
+        
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        location = data.get('location', 'Unknown')
+        bounds = data.get('bounds')
+        
+        if not bounds or len(bounds) != 4:
+            return jsonify({'error': 'bounds array [min_lng, min_lat, max_lng, max_lat] is required'}), 400
+        
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        cloud_cover = data.get('cloud_cover', 20)
+        
+        # Get image from GEE
+        result = gee_integration.get_image_for_analysis(
+            location=location,
+            bounds=bounds,
+            start_date=start_date,
+            end_date=end_date,
+            cloud_cover=cloud_cover
+        )
+        
+        # Encode RGB image
+        rgb_image = encode_image(result['rgb_image'])
+        
+        response = {
+            'success': True,
+            'image': rgb_image,
+            'statistics': result['statistics'],
+            'land_cover': result['land_cover'],
+            'metadata': result['metadata']
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"GEE fetch image error: {e}", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'type': type(e).__name__
+        }), 500
+
+@app.route('/gee/calculate-indices', methods=['POST'])
+def gee_calculate_indices():
+    """
+    Calculate spectral indices using Google Earth Engine
+    
+    Expected JSON payload:
+    {
+        "bounds": [min_lng, min_lat, max_lng, max_lat],
+        "start_date": "YYYY-MM-DD" (optional),
+        "end_date": "YYYY-MM-DD" (optional),
+        "cloud_cover": 20 (optional)
+    }
+    """
+    try:
+        if not gee_integration or not gee_integration.initialized:
+            return jsonify({
+                'error': 'Google Earth Engine not initialized',
+                'type': 'GEEInitializationError'
+            }), 503
+        
+        data = request.get_json()
+        
+        if not data or 'bounds' not in data:
+            return jsonify({'error': 'bounds array is required'}), 400
+        
+        bounds = data['bounds']
+        if len(bounds) != 4:
+            return jsonify({'error': 'bounds must be [min_lng, min_lat, max_lng, max_lat]'}), 400
+        
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        cloud_cover = data.get('cloud_cover', 20)
+        
+        # Get image collection
+        collection = gee_integration.get_sentinel2_collection(
+            start_date=start_date,
+            end_date=end_date,
+            cloud_cover=cloud_cover
+        )
+        
+        # Get least cloudy image
+        image = gee_integration.get_least_cloudy_image(collection)
+        
+        # Clip to bounds
+        image = gee_integration.clip_to_bounds(image, bounds)
+        
+        # Calculate indices
+        ndvi = gee_integration.calculate_ndvi(image)
+        ndwi = gee_integration.calculate_ndwi(image)
+        ndbi = gee_integration.calculate_ndbi(image)
+        
+        # Get statistics - import ee here to avoid circular imports
+        import ee
+        geometry = ee.Geometry.Rectangle(bounds)
+        ndvi_stats = gee_integration.get_image_statistics(ndvi, geometry)
+        ndwi_stats = gee_integration.get_image_statistics(ndwi, geometry)
+        ndbi_stats = gee_integration.get_image_statistics(ndbi, geometry)
+        
+        response = {
+            'success': True,
+            'indices': {
+                'ndvi': {
+                    'mean': ndvi_stats.get('NDVI_mean', 0),
+                    'min': ndvi_stats.get('NDVI_min', 0),
+                    'max': ndvi_stats.get('NDVI_max', 0),
+                    'std': ndvi_stats.get('NDVI_stdDev', 0)
+                },
+                'ndwi': {
+                    'mean': ndwi_stats.get('NDWI_mean', 0),
+                    'min': ndwi_stats.get('NDWI_min', 0),
+                    'max': ndwi_stats.get('NDWI_max', 0),
+                    'std': ndwi_stats.get('NDWI_stdDev', 0)
+                },
+                'ndbi': {
+                    'mean': ndbi_stats.get('NDBI_mean', 0),
+                    'min': ndbi_stats.get('NDBI_min', 0),
+                    'max': ndbi_stats.get('NDBI_max', 0),
+                    'std': ndbi_stats.get('NDBI_stdDev', 0)
+                }
+            },
+            'metadata': {
+                'source': 'google-earth-engine',
+                'bounds': bounds,
+                'start_date': start_date,
+                'end_date': end_date,
+                'cloud_cover': cloud_cover
+            }
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"GEE calculate indices error: {e}", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'type': type(e).__name__
+        }), 500
+
+@app.route('/gee/land-cover', methods=['POST'])
+def gee_land_cover():
+    """
+    Get land cover classification using Google Earth Engine
+    
+    Expected JSON payload:
+    {
+        "bounds": [min_lng, min_lat, max_lng, max_lat],
+        "start_date": "YYYY-MM-DD" (optional),
+        "end_date": "YYYY-MM-DD" (optional),
+        "cloud_cover": 20 (optional)
+    }
+    """
+    try:
+        if not gee_integration or not gee_integration.initialized:
+            return jsonify({
+                'error': 'Google Earth Engine not initialized',
+                'type': 'GEEInitializationError'
+            }), 503
+        
+        data = request.get_json()
+        
+        if not data or 'bounds' not in data:
+            return jsonify({'error': 'bounds array is required'}), 400
+        
+        bounds = data['bounds']
+        if len(bounds) != 4:
+            return jsonify({'error': 'bounds must be [min_lng, min_lat, max_lng, max_lat]'}), 400
+        
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        cloud_cover = data.get('cloud_cover', 20)
+        
+        # Get image collection
+        collection = gee_integration.get_sentinel2_collection(
+            start_date=start_date,
+            end_date=end_date,
+            cloud_cover=cloud_cover
+        )
+        
+        # Get least cloudy image
+        image = gee_integration.get_least_cloudy_image(collection)
+        
+        # Clip to bounds
+        image = gee_integration.clip_to_bounds(image, bounds)
+        
+        # Calculate spectral indices
+        image_with_indices = gee_integration.get_spectral_indices(image)
+        
+        # Get land cover statistics
+        land_cover_stats = gee_integration.get_land_cover_statistics(
+            image_with_indices, bounds
+        )
+        
+        response = {
+            'success': True,
+            'land_cover': land_cover_stats,
+            'metadata': {
+                'source': 'google-earth-engine',
+                'method': 'spectral_indices_threshold',
+                'bounds': bounds,
+                'start_date': start_date,
+                'end_date': end_date,
+                'cloud_cover': cloud_cover
+            }
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"GEE land cover error: {e}", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'type': type(e).__name__
+        }), 500
+
+@app.route('/gee/analyze', methods=['POST'])
+def gee_analyze():
+    """
+    Comprehensive analysis using Google Earth Engine
+    
+    Expected JSON payload:
+    {
+        "location": "City name",
+        "bounds": [min_lng, min_lat, max_lng, max_lat],
+        "start_date": "YYYY-MM-DD" (optional),
+        "end_date": "YYYY-MM-DD" (optional),
+        "cloud_cover": 20 (optional),
+        "include_visualization": true/false
+    }
+    """
+    try:
+        if not gee_integration or not gee_integration.initialized:
+            return jsonify({
+                'error': 'Google Earth Engine not initialized',
+                'type': 'GEEInitializationError'
+            }), 503
+        
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        location = data.get('location', 'Unknown')
+        bounds = data.get('bounds')
+        
+        if not bounds or len(bounds) != 4:
+            return jsonify({'error': 'bounds array [min_lng, min_lat, max_lng, max_lat] is required'}), 400
+        
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        cloud_cover = data.get('cloud_cover', 20)
+        include_visualization = data.get('include_visualization', False)
+        
+        # Get comprehensive analysis from GEE
+        result = gee_integration.get_image_for_analysis(
+            location=location,
+            bounds=bounds,
+            start_date=start_date,
+            end_date=end_date,
+            cloud_cover=cloud_cover
+        )
+        
+        # Encode RGB image if visualization requested
+        visualization = None
+        if include_visualization:
+            visualization = encode_image(result['rgb_image'])
+        
+        # Map land cover to classification format
+        land_cover = result['land_cover']
+        class_areas = land_cover.get('class_areas', {})
+        
+        classification = {
+            'water': {
+                'percentage': class_areas.get('water', {}).get('percentage', 0),
+                'area_km2': class_areas.get('water', {}).get('area_km2', 0)
+            },
+            'forest': {
+                'percentage': class_areas.get('forest', {}).get('percentage', 0),
+                'area_km2': class_areas.get('forest', {}).get('area_km2', 0)
+            },
+            'urban': {
+                'percentage': class_areas.get('urban', {}).get('percentage', 0),
+                'area_km2': class_areas.get('urban', {}).get('area_km2', 0)
+            },
+            'agricultural': {
+                'percentage': class_areas.get('agricultural', {}).get('percentage', 0),
+                'area_km2': class_areas.get('agricultural', {}).get('area_km2', 0)
+            },
+            'barren': {
+                'percentage': class_areas.get('barren', {}).get('percentage', 0),
+                'area_km2': class_areas.get('barren', {}).get('area_km2', 0)
+            }
+        }
+        
+        # Extract NDVI from statistics
+        stats = result['statistics']
+        ndvi_mean = stats.get('NDVI_mean', 0) if isinstance(stats, dict) else 0
+        
+        ndvi_analysis = {
+            'mean_ndvi': ndvi_mean,
+            'min_ndvi': stats.get('NDVI_min', -1) if isinstance(stats, dict) else -1,
+            'max_ndvi': stats.get('NDVI_max', 1) if isinstance(stats, dict) else 1,
+            'health_distribution': {
+                'excellent': 0,  # Would need to calculate from NDVI distribution
+                'good': 0,
+                'fair': 0,
+                'poor': 0,
+                'critical': 0
+            }
+        }
+        
+        response = {
+            'success': True,
+            'classification': classification,
+            'ndvi_analysis': ndvi_analysis,
+            'land_cover': land_cover,
+            'statistics': stats,
+            'visualization': visualization,
+            'metadata': result['metadata']
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"GEE analyze error: {e}", exc_info=True)
         return jsonify({
             'error': str(e),
             'type': type(e).__name__

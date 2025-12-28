@@ -121,6 +121,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/location', require('./routes/location'));
 app.use('/api/satellite', require('./routes/satellite'));
+app.use('/api/city-gee', require('./routes/city-gee'));
 app.use('/api/weather', require('./routes/weather'));
 app.use('/api/analysis', require('./routes/analysis'));
 app.use('/api/reports', require('./routes/reports'));
