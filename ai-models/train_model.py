@@ -429,7 +429,7 @@ if __name__ == "__main__":
     history = trainer.train(
         X_train_prep, y_train_prep,
         X_val_prep, y_val_prep,
-        epochs=30,
+        epochs=100,
         batch_size=16
     )
     
