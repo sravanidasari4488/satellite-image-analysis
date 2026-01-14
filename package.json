@@ -1,0 +1,38 @@
+{
+  "name": "satellite-image-analysis",
+  "version": "1.0.0",
+  "description": "Full-stack satellite image analysis application",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd backend && npm run dev",
+    "client": "cd frontend && npm start",
+    "ai-service": "cd ai-models && .\\venv\\Scripts\\python.exe app.py",
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npm run build",
+    "setup": "node setup.js",
+    "test-setup": "node test-setup.js",
+    "configure-keys": "node configure-keys.js",
+    "get-sentinelhub-token": "node get-sentinelhub-token.js",
+    "setup-mongodb": "node setup-mongodb.js",
+    "setup-google-oauth": "node setup-google-oauth.js",
+    "start": "npm run dev"
+  },
+  "keywords": [
+    "satellite",
+    "image-analysis",
+    "weather",
+    "ai",
+    "react",
+    "nodejs"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "mongodb": "4.1"
+  }
+}

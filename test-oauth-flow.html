@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth Flow Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        .test-result {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛰️ Satellite Image Analysis - OAuth Test</h1>
+        
+        <div class="status info">
+            <strong>Test Status:</strong> This page tests the OAuth flow to ensure everything is working correctly.
+        </div>
+
+        <h2>🔧 Backend Tests</h2>
+        <button onclick="testBackend()">Test Backend Connection</button>
+        <button onclick="testGoogleOAuth()">Test Google OAuth Endpoint</button>
+        
+        <h2>🌐 Frontend Tests</h2>
+        <button onclick="testFrontend()">Test Frontend Connection</button>
+        <button onclick="testOAuthCallback()">Test OAuth Callback Route</button>
+        
+        <h2>🔄 Full OAuth Flow Test</h2>
+        <button onclick="startOAuthFlow()">Start Google OAuth Flow</button>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
+            results.appendChild(div);
+        }
+
+        async function testBackend() {
+            try {
+                const response = await fetch('http://localhost:5000/api/auth/google');
+                if (response.ok) {
+                    addResult('✅ Backend is running and Google OAuth endpoint is accessible', 'success');
+                } else {
+                    addResult(`❌ Backend responded with status: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Backend connection failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testGoogleOAuth() {
+            try {
+                // This will redirect to Google, so we expect a redirect
+                const response = await fetch('http://localhost:5000/api/auth/google', {
+                    redirect: 'manual'
+                });
+                
+                if (response.type === 'opaqueredirect' || response.status === 0) {
+                    addResult('✅ Google OAuth endpoint is working (redirected to Google)', 'success');
+                } else {
+                    addResult(`⚠️ Google OAuth response: ${response.status}`, 'info');
+                }
+            } catch (error) {
+                addResult(`❌ Google OAuth test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testFrontend() {
+            try {
+                const response = await fetch('http://localhost:3000');
+                if (response.ok) {
+                    addResult('✅ Frontend is running and accessible', 'success');
+                } else {
+                    addResult(`❌ Frontend responded with status: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                addResult(`❌ Frontend connection failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testOAuthCallback() {
+            try {
+                // Test if the callback route exists (it should return a React app)
+                const response = await fetch('http://localhost:3000/auth/callback');
+                if (response.ok) {
+                    addResult('✅ OAuth callback route is accessible', 'success');
+                } else {
+                    addResult(`⚠️ OAuth callback route status: ${response.status}`, 'info');
+                }
+            } catch (error) {
+                addResult(`❌ OAuth callback test failed: ${error.message}`, 'error');
+            }
+        }
+
+        function startOAuthFlow() {
+            addResult('🚀 Starting Google OAuth flow...', 'info');
+            addResult('📝 This will redirect you to Google for authentication', 'info');
+            addResult('✅ After successful authentication, you should be redirected back to the app', 'success');
+            
+            // Start the OAuth flow
+            setTimeout(() => {
+                window.location.href = 'http://localhost:5000/api/auth/google';
+            }, 2000);
+        }
+
+        // Auto-run basic tests on page load
+        window.onload = function() {
+            addResult('🔍 Running automatic tests...', 'info');
+            setTimeout(testBackend, 500);
+            setTimeout(testFrontend, 1000);
+            setTimeout(testGoogleOAuth, 1500);
+        };
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
