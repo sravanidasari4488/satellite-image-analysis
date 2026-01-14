@@ -2355,53 +2355,10 @@ class GeospatialIntelligenceSystem:
                                         f"Try selecting a different locality or check the locality coordinates."
                                     )
                                 else:
-                                    # All pixels are masked - try a larger buffer to see if we can find data nearby
-                                    # This handles cases where the exact locality coordinates don't have coverage
-                                    # but nearby areas do
-                                    try:
-                                        larger_test_geom = EarthEngineService.create_centroid_buffer(center_lat, center_lon, 10000)  # 10km
-                                        larger_test_hist = test_labels.reduceRegion(
-                                            reducer=ee.Reducer.frequencyHistogram(),
-                                            geometry=larger_test_geom,
-                                            scale=30,
-                                            maxPixels=1e13,
-                                            bestEffort=True
-                                        )
-                                        larger_test_hist_dict = larger_test_hist.getInfo()
-                                        
-                                        if larger_test_hist_dict and 'label' in larger_test_hist_dict:
-                                            larger_test_label_hist = larger_test_hist_dict['label']
-                                            larger_valid_pixels = sum(
-                                                int(float(count)) 
-                                                for label_str, count in larger_test_label_hist.items() 
-                                                if int(float(label_str)) != -1
-                                            )
-                                            
-                                            if larger_valid_pixels > 0:
-                                                error_msg += (
-                                                    f"Dynamic World has data nearby ({larger_valid_pixels} valid pixels found in 10km radius), "
-                                                    f"but the locality coordinates ({center_lat:.4f}, {center_lon:.4f}) are outside the coverage area. "
-                                                    f"This may indicate incorrect locality coordinates or the locality is in a data gap. "
-                                                    f"Try selecting a different locality or verify the coordinates."
-                                                )
-                                            else:
-                                                error_msg += (
-                                                    f"Dynamic World image exists but all pixels are masked (no data) for this location "
-                                                    f"({center_lat:.4f}, {center_lon:.4f}), even in a 10km radius. "
-                                                    f"This indicates the area is outside Dynamic World coverage. "
-                                                    f"Dynamic World may not have data for Hyderabad region. "
-                                                    f"Try a different city or locality."
-                                                )
-                                        else:
-                                            error_msg += (
-                                                "Dynamic World image exists but all pixels are masked (no data) for this location. "
-                                                "This may indicate the area is outside Dynamic World coverage."
-                                            )
-                                    except Exception:
-                                        error_msg += (
-                                            "Dynamic World image exists but all pixels are masked (no data) for this location. "
-                                            "This may indicate the area is outside Dynamic World coverage."
-                                        )
+                                    error_msg += (
+                                        "Dynamic World image exists but all pixels are masked (no data) for this location. "
+                                        "This may indicate the area is outside Dynamic World coverage."
+                                    )
                             else:
                                 error_msg += (
                                     "Dynamic World has data for this location, but reduceRegion returned empty results. "
