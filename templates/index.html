@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geospatial Intelligence System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌍 Geospatial Intelligence System</h1>
+            <p class="subtitle">Real-time satellite-based land cover analysis and climate risk assessment</p>
+        </header>
+
+        <div class="main-content">
+            <div class="input-section">
+                <form id="analysisForm">
+                    <div class="input-group">
+                        <label for="location">Location</label>
+                        <input 
+                            type="text" 
+                            id="location" 
+                            name="location" 
+                            placeholder="Enter city name (e.g., Paris, France) or coordinates (e.g., 48.8566,2.3522)"
+                            required
+                        >
+                        <small>Enter a city name or coordinates (latitude,longitude)</small>
+                    </div>
+                    
+                    <div class="date-range">
+                        <div class="input-group">
+                            <label for="startDate">Start Date (Optional)</label>
+                            <input type="date" id="startDate" name="startDate">
+                        </div>
+                        <div class="input-group">
+                            <label for="endDate">End Date (Optional)</label>
+                            <input type="date" id="endDate" name="endDate">
+                        </div>
+                    </div>
+
+                    <button type="submit" id="analyzeBtn" class="btn-primary">
+                        <span class="btn-text">Analyze Location</span>
+                        <span class="btn-loader" style="display: none;">
+                            <span class="spinner"></span> Processing...
+                        </span>
+                    </button>
+                </form>
+            </div>
+
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+            <div id="results" class="results-section" style="display: none;">
+                <div class="results-header">
+                    <h2>Analysis Results</h2>
+                    <div class="location-info" id="locationInfo"></div>
+                </div>
+
+                <div class="results-grid">
+                    <!-- Land Cover Section -->
+                    <div class="card land-cover-card">
+                        <h3>📊 Land Cover Classification</h3>
+                        <div class="land-cover-stats">
+                            <div class="stat-item">
+                                <div class="stat-label">
+                                    <span class="icon">🏙️</span>
+                                    <span>Urban</span>
+                                </div>
+                                <div class="stat-value" id="urbanPercent">0%</div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill urban" id="urbanProgress"></div>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">
+                                    <span class="icon">🌲</span>
+                                    <span>Forest</span>
+                                </div>
+                                <div class="stat-value" id="forestPercent">0%</div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill forest" id="forestProgress"></div>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">
+                                    <span class="icon">🌿</span>
+                                    <span>Vegetation</span>
+                                </div>
+                                <div class="stat-value" id="vegetationPercent">0%</div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill vegetation" id="vegetationProgress"></div>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">
+                                    <span class="icon">💧</span>
+                                    <span>Water</span>
+                                </div>
+                                <div class="stat-value" id="waterPercent">0%</div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill water" id="waterProgress"></div>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">
+                                    <span class="icon">🏜️</span>
+                                    <span>Bare Land</span>
+                                </div>
+                                <div class="stat-value" id="bareLandPercent">0%</div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill bare-land" id="bareLandProgress"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="pixel-count">
+                            <small>Total Pixels Analyzed: <span id="totalPixels">0</span></small>
+                        </div>
+                    </div>
+
+                    <!-- Weather Section -->
+                    <div class="card weather-card">
+                        <h3>🌤️ Current Weather</h3>
+                        <div class="weather-grid">
+                            <div class="weather-item">
+                                <div class="weather-icon">🌡️</div>
+                                <div class="weather-label">Temperature</div>
+                                <div class="weather-value" id="temperature">-</div>
+                            </div>
+                            <div class="weather-item">
+                                <div class="weather-icon">💨</div>
+                                <div class="weather-label">Humidity</div>
+                                <div class="weather-value" id="humidity">-</div>
+                            </div>
+                            <div class="weather-item">
+                                <div class="weather-icon">🌧️</div>
+                                <div class="weather-label">Precipitation</div>
+                                <div class="weather-value" id="precipitation">-</div>
+                            </div>
+                            <div class="weather-item">
+                                <div class="weather-icon">💨</div>
+                                <div class="weather-label">Wind Speed</div>
+                                <div class="weather-value" id="windSpeed">-</div>
+                            </div>
+                            <div class="weather-item">
+                                <div class="weather-icon">📊</div>
+                                <div class="weather-label">Pressure</div>
+                                <div class="weather-value" id="pressure">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Climate Risks Section -->
+                    <div class="card risks-card">
+                        <h3>⚠️ Climate Risk Assessment</h3>
+                        <div class="risks-grid">
+                            <div class="risk-item">
+                                <div class="risk-header">
+                                    <span class="risk-icon">🌊</span>
+                                    <span class="risk-label">Flood Risk</span>
+                                </div>
+                                <div class="risk-value" id="floodRisk">0</div>
+                                <div class="risk-bar">
+                                    <div class="risk-fill flood" id="floodRiskBar"></div>
+                                </div>
+                                <div class="risk-level" id="floodLevel">Low</div>
+                            </div>
+                            <div class="risk-item">
+                                <div class="risk-header">
+                                    <span class="risk-icon">🔥</span>
+                                    <span class="risk-label">Heat Risk</span>
+                                </div>
+                                <div class="risk-value" id="heatRisk">0</div>
+                                <div class="risk-bar">
+                                    <div class="risk-fill heat" id="heatRiskBar"></div>
+                                </div>
+                                <div class="risk-level" id="heatLevel">Low</div>
+                            </div>
+                            <div class="risk-item">
+                                <div class="risk-header">
+                                    <span class="risk-icon">☀️</span>
+                                    <span class="risk-label">Drought Risk</span>
+                                </div>
+                                <div class="risk-value" id="droughtRisk">0</div>
+                                <div class="risk-bar">
+                                    <div class="risk-fill drought" id="droughtRiskBar"></div>
+                                </div>
+                                <div class="risk-level" id="droughtLevel">Low</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bounding Box Section -->
+                    <div class="card bbox-card">
+                        <h3>📍 Bounding Box</h3>
+                        <div class="bbox-info">
+                            <div class="bbox-item">
+                                <span class="bbox-label">Min Latitude:</span>
+                                <span class="bbox-value" id="minLat">-</span>
+                            </div>
+                            <div class="bbox-item">
+                                <span class="bbox-label">Max Latitude:</span>
+                                <span class="bbox-value" id="maxLat">-</span>
+                            </div>
+                            <div class="bbox-item">
+                                <span class="bbox-label">Min Longitude:</span>
+                                <span class="bbox-value" id="minLon">-</span>
+                            </div>
+                            <div class="bbox-item">
+                                <span class="bbox-label">Max Longitude:</span>
+                                <span class="bbox-value" id="maxLon">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timestamp">
+                    <small>Analysis completed at: <span id="timestamp">-</span></small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
+
